@@ -1,0 +1,171 @@
+# at
+
+> This document is the source code and the documentation.
+
+A Luanti Lua API utility for working with positions/vectors.
+
+## Example
+
+```lua woven example
+local at = dofile(core.get_modpath('at') .. '/init.lua')
+
+core.override_item("fire:unforgiving", {
+  on_timer = on_timer(pos_arg)
+    at(pos_arg):neightbors():each(function(npos)
+      npos:get_node():if_else(is_flammable, function(_node)
+        npos:remove_node()
+      end)
+    end)
+  end
+})
+```
+
+A concise and chainable API that allows for a bit of [point-free][point-free] style.
+
+## Implementation
+
+The `at` module returns the following.
+
+```moonscript woven 'module return'
+at = (pos) ->
+  Position.enhance(pos)
+
+return at
+```
+
+The `at` being the function you saw in action in the [example][example].
+it is made to take a vector as argument: `{x=3,y=2,z=1}`.
+
+The [setmetatable][setmetatable] is a lua feature that
+allows for a more memory efficient implementation.
+
+We use `setmetatable` to prevent creating more tables while we have a perfectly fine table here already. We just want to
+enhance it with some methods.
+
+The return value of `at` is the table itself. That allows us to still pass the return value of `at` to other Luanti APIs -
+making it easy to adopt at project in your project as it works with the vector code you already have.
+
+So how does something like `a(pos):get_node()` work? Where is that defined?
+
+```moonscript woven 'Position class'
+class Position extends Conditional
+
+  @enhance: (pos) ->
+    setmetatable pos, @ -- The @ refers to the class itself
+
+  -- < The other methods
+```
+
+> We would have had to write a bit more in Lua. An exercise for you would be to
+> figure out the equivalent of writing this in Lua.
+
+Not just `get_node` is defined; but many others.
+
+```moonscript woven 'The other methods'
+up: ->
+  at vector.add(@, up)
+
+down: ->
+  at vector.add(@, down)
+
+get_node: ->
+  Conditional.enhance core.get_node(@)
+
+get_node_light: ->
+  core.get_node_light(@)
+
+neighbours: ->
+  Conditional.enhance Iterable.map((offset) -> Position.enhance(vector.add(@, offset)))
+
+find_nodes_in_area: (v1, v2, ...) ->
+  pos1 = vector.add(@, v1)
+  pos2 = vector.add(@, v2)
+  Conditional.enhance core.find_nodes_in_area(pos1, pos2, ...)
+
+find_node_near: (...) ->
+  Conditional.enhance core.find_node_near(@, ...)
+
+get_meta: ->
+  core.get_meta(@)
+```
+
+> I like the `...` behavior of moonscript compared to Lua where I would have to [`unpack(...)`][unpack].
+
+Here are the constants we need for those methods to work.
+
+```moonscript woven 'Constants'
+up = vector.new(0, 1, 0)
+down = vector.new(0, -1, 0)
+neighbour_offsets = {
+  {x:1, y:0, z:0}, {x:-1, y:0, z:0},
+  {x:0, y:1, z:0}, {x:0, y:-1, z:0},
+  {x:0, y:0, z:1}, {x:0, y:0, z:-1}
+}
+```
+
+You might have noticed the `extends Conditional` and wondered what it looks like.
+
+```moonscript woven 'Conditional class'
+class Conditional
+
+  @enhance: (coords) ->
+    setmetatable coords, @
+
+  if_else: (pred, t, f) -> (...) ->
+    pred(...) and t(...) or (f or -> nil)(...)
+
+```
+
+With this defined and extended upon we can do `at(pos):if_else(is_under_water, hold_breath, breath)`.
+
+We also set the prototype of the return values for functions that return an array of things.
+
+```moonscript|moonscript woven | tee init.moon
+-- < Constants
+-- < Conditional class
+-- < Position class
+
+class Iterable extends Conditional
+  map: (fn) ->
+    for item in @
+      fn(item)
+
+  each: (fn) ->
+    for item in @
+      fn(item)
+
+-- < module return
+```
+
+
+That is all the code for now. You can always check the [repository][repository] if you want to see if this document has changed.
+
+> Remember that this document is the code. :)
+
+I wish you fun and peace writing Lua and moonscript.
+
+## Documentation
+
+This is a literate project that uses [markatzea][markatzea] in concert with [woven][woven] to weave code from a markdown file.
+
+You can generate both the README and the code with:
+
+```bash
+# Also writes the init.moon
+markatzea README.mz > README.md
+```
+
+```bash bash
+# Creates the init.lua
+moonc init.moon
+```
+
+You can read another article about doing in world generative testing for Luanti (mods) using [luanti_check][luanti_check].
+
+[example]:#example
+[setmetatable]:https://www.lua.org/pil/13.html
+[unpack]:https://www.lua.org/pil/5.1.html
+[luanti_check]:https://github.com/bas080/luanti_check
+[point-free]:https://en.wikipedia.org/wiki/Tacit_programming
+[woven]:https://github.com/bas080/woven
+[markatzea]:https://github.com/bas080/markatzea
