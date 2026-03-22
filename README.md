@@ -52,8 +52,6 @@ class Position extends Conditional
 
   @enhance: (pos) ->
     setmetatable pos, @ -- The @ refers to the class itself
-
-  -- < The other methods
 ```
 
 > We would have had to write a bit more in Lua. An exercise for you would be to
@@ -62,45 +60,93 @@ class Position extends Conditional
 Not just `get_node` is defined; but many others.
 
 ```moonscript
-up: ->
+up: =>
   at vector.add(@, up)
 
-down: ->
+down: =>
   at vector.add(@, down)
 
-get_node: ->
+get_node: =>
   Conditional.enhance core.get_node(@)
 
-get_node_light: ->
+get_node_light: =>
   core.get_node_light(@)
 
-neighbours: ->
+neighbours: =>
   Conditional.enhance Iterable.map((offset) -> Position.enhance(vector.add(@, offset)))
 
-find_nodes_in_area: (v1, v2, ...) ->
+find_nodes_in_area: (v1, v2, ...) =>
   pos1 = vector.add(@, v1)
   pos2 = vector.add(@, v2)
   Conditional.enhance core.find_nodes_in_area(pos1, pos2, ...)
 
-find_node_near: (...) ->
+find_node_near: (...) =>
   Conditional.enhance core.find_node_near(@, ...)
 
-get_meta: ->
+get_meta: =>
   core.get_meta(@)
 ```
 
-> I like the `...` behavior of moonscript compared to Lua where I would have to [`unpack(...)`][unpack].
+A day after writing this I saw a very obvious pattern. Most of these helpers pass the `@` as first argument to a
+function defined on Luanti's `core` namespace. We can use the core function that take
+pos as first argument as is.
+
+```moonscript
+get_meta: core.get_meta
+get_node: core.get_node
+get_node_light: core.get_node_light
+get_meta: core.get_meta
+find_node_near: core.find_node_near
+```
+
+Then we have a few helpers that require partial application.
+
+```moonscript
+up: partial(vector.add, up)
+down: partial(vector.add, down)
+north: partial(vector.add, north)
+south: partial(vector.add, north)
+west: partial(vector.add, north)
+east: partial(vector.add, north)
+
+-- Placed it here because it is related
+neighbours: () => Iterator.map(neighbour_offsets, n -> vector.add(n, @))
+```
+
+The partial implementation:
+
+```moonscript
+partial = (fn, ...) ->
+  fixed = {...}
+  (...) -> fn unpack(fixed), ...
+```
+
+We also have the pattern where functions that allow for two positions to define an area could also be abstracted.
+
+```moonscript
+offsets_to_positions = fn -> (pos, v1, v2, ...) ->
+  p1 = vector.add(pos, v1)
+  p2 = vector.add(pos, v2)
+  fn(p1, p2, ...)
+```
+
+```moonscript
+find_nodes_in_area_under_air: offsets_to_positions(core.find_nodes_in_area_under_air)
+find_nodes_in_area: offsets_to_positions(core.find_nodes_in_area)
+```
+
+> Finding a name for this function was the hardest part.
 
 Here are the constants we need for those methods to work.
 
 ```moonscript
 up = vector.new(0, 1, 0)
 down = vector.new(0, -1, 0)
-neighbour_offsets = {
-  {x:1, y:0, z:0}, {x:-1, y:0, z:0},
-  {x:0, y:1, z:0}, {x:0, y:-1, z:0},
-  {x:0, y:0, z:1}, {x:0, y:0, z:-1}
-}
+north = vector.new(1, 0, 0)
+south = vector.new(-1, 0, 0)
+east = vector.new(0, 0, 1)
+west = vector.new(0, 0, -1)
+neighbour_offsets = { up, down, north, south, east, west }
 ```
 
 You might have noticed the `extends Conditional` and wondered what it looks like.
@@ -113,18 +159,14 @@ class Conditional
 
   if_else: (pred, t, f) -> (...) ->
     pred(...) and t(...) or (f or -> nil)(...)
-
 ```
 
 With this defined and extended upon we can do `at(pos):if_else(is_under_water, hold_breath, breath)`.
 
-We also set the prototype of the return values for functions that return an array of things.
+Furthermore we want some helpers that make it easier to work with table. This will allow us to write.
+`at(pos):neighbours():map(f -> f:up!)`
 
 ```moonscript
--- < Constants
--- < Conditional class
--- < Position class
-
 class Iterable extends Conditional
   map: (fn) ->
     for item in @
@@ -133,17 +175,43 @@ class Iterable extends Conditional
   each: (fn) ->
     for item in @
       fn(item)
+```
 
--- < module return
+Now for putting it all together.
+
+```moonscript
+-- < Constants
+
+-- < Conditional class
+
+-- < Iterable class
+
+-- Helpers for defining methods
+
+-- < partial helper
+
+-- < offsets_to_positions
+
+-- < Position class
+
+  -- Position methods
+  -- < Position methods
+
+  -- Direction methods
+  -- < Direction methods
+
+  -- Area methods
+  -- < Area methods
 ```
 ```moonscript
 up = vector.new(0, 1, 0)
 down = vector.new(0, -1, 0)
-neighbour_offsets = {
-  {x:1, y:0, z:0}, {x:-1, y:0, z:0},
-  {x:0, y:1, z:0}, {x:0, y:-1, z:0},
-  {x:0, y:0, z:1}, {x:0, y:0, z:-1}
-}
+north = vector.new(1, 0, 0)
+south = vector.new(-1, 0, 0)
+east = vector.new(0, 0, 1)
+west = vector.new(0, 0, -1)
+neighbour_offsets = { up, down, north, south, east, west }
+
 class Conditional
 
   @enhance: (coords) ->
@@ -152,37 +220,6 @@ class Conditional
   if_else: (pred, t, f) -> (...) ->
     pred(...) and t(...) or (f or -> nil)(...)
 
-class Position extends Conditional
-
-  @enhance: (pos) ->
-    setmetatable pos, @ -- The @ refers to the class itself
-
-  up: ->
-    at vector.add(@, up)
-  
-  down: ->
-    at vector.add(@, down)
-  
-  get_node: ->
-    Conditional.enhance core.get_node(@)
-  
-  get_node_light: ->
-    core.get_node_light(@)
-  
-  neighbours: ->
-    Conditional.enhance Iterable.map((offset) -> Position.enhance(vector.add(@, offset)))
-  
-  find_nodes_in_area: (v1, v2, ...) ->
-    pos1 = vector.add(@, v1)
-    pos2 = vector.add(@, v2)
-    Conditional.enhance core.find_nodes_in_area(pos1, pos2, ...)
-  
-  find_node_near: (...) ->
-    Conditional.enhance core.find_node_near(@, ...)
-  
-  get_meta: ->
-    core.get_meta(@)
-
 class Iterable extends Conditional
   map: (fn) ->
     for item in @
@@ -192,10 +229,43 @@ class Iterable extends Conditional
     for item in @
       fn(item)
 
-at = (pos) ->
-  Position.enhance(pos)
+-- Helpers for defining methods
 
-return at
+partial = (fn, ...) ->
+  fixed = {...}
+  (...) -> fn unpack(fixed), ...
+
+offsets_to_positions = fn -> (pos, v1, v2, ...) ->
+  p1 = vector.add(pos, v1)
+  p2 = vector.add(pos, v2)
+  fn(p1, p2, ...)
+
+class Position extends Conditional
+
+  @enhance: (pos) ->
+    setmetatable pos, @ -- The @ refers to the class itself
+
+  -- Position methods
+  get_meta: core.get_meta
+  get_node: core.get_node
+  get_node_light: core.get_node_light
+  get_meta: core.get_meta
+  find_node_near: core.find_node_near
+
+  -- Direction methods
+  up: partial(vector.add, up)
+  down: partial(vector.add, down)
+  north: partial(vector.add, north)
+  south: partial(vector.add, north)
+  west: partial(vector.add, north)
+  east: partial(vector.add, north)
+  
+  -- Placed it here because it is related
+  neighbours: () => Iterator.map(neighbour_offsets, n -> vector.add(n, @))
+
+  -- Area methods
+  find_nodes_in_area_under_air: offsets_to_positions(core.find_nodes_in_area_under_air)
+  find_nodes_in_area: offsets_to_positions(core.find_nodes_in_area)
 ```
 
 
@@ -217,7 +287,7 @@ markatzea README.mz > README.md
 ```
 
 ```bash
-# Creates the init.lua
+# Create the init.lua
 moonc init.moon
 ```
 
