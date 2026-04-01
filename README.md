@@ -30,7 +30,7 @@ The `at` module returns the following.
 at = (pos) ->
   Position.enhance(pos)
 
-return at
+return at, Position
 ```
 
 The `at` being the function you saw in action in the [example][example].
@@ -94,9 +94,26 @@ pos as first argument as is.
 ```moonscript
 get_meta: core.get_meta
 get_node: core.get_node
+get_node_or_nil: core.get_node_or_nil
+get_node_timer: core.get_node_timer
 get_node_light: core.get_node_light
+get_natural_light: core.get_natural_light
 get_meta: core.get_meta
 find_node_near: core.find_node_near
+
+-- < Position methods that return nil
+```
+
+Some methods like `core.set_node` do a mutation to the world and do not return something.
+These we can make a bit more chainable. In the [fp][fp] world the [higher order function][higher_order_function] that enables
+that is often called `tap`.
+
+```moonscript
+tap = (fn) -> (...) -> fn(...); ...
+```
+
+```moonscript
+set_node: tap(core.set_node)
 ```
 
 Then we have a few helpers that require partial application.
@@ -124,7 +141,7 @@ partial = (fn, ...) ->
 We also have the pattern where functions that allow for two positions to define an area could also be abstracted.
 
 ```moonscript
-offsets_to_positions = fn -> (pos, v1, v2, ...) ->
+offsets_to_positions = (fn) -> (pos, v1, v2, ...) ->
   p1 = vector.add(pos, v1)
   p2 = vector.add(pos, v2)
   fn(p1, p2, ...)
@@ -163,18 +180,42 @@ class Conditional
 
 With this defined and extended upon we can do `at(pos):if_else(is_under_water, hold_breath, breath)`.
 
-Furthermore we want some helpers that make it easier to work with table. This will allow us to write.
+Furthermore we want some helpers that make it easier to work with positions. This will allow us to write.
 `at(pos):neighbours():map(f -> f:up!)`
+
+These helpers are only meant to work on positions. You do not want to be enhancing things that do not
+represent a position with position methods.
 
 ```moonscript
 class Iterable extends Conditional
+  reduce: (items, fn, acc) ->
+    for item in items
+      acc = fn(acc, at(item))
+    acc
+
   map: (fn) ->
-    for item in @
-      fn(item)
+    @reduce((acc, item) ->
+      table.insert acc, fn(item)
+      acc
+    , {})
 
   each: (fn) ->
+    @reduce((acc, item) ->
+      fn item
+      acc
+    , nil)
+
+  filter: (pred) ->
+    @reduce((acc, item) ->
+      if pred item
+        table.insert acc, item
+      acc
+    , {})
+
+  find: (pred) ->
     for item in @
-      fn(item)
+      return item if pred at(item)
+    nil
 ```
 
 Now for putting it all together.
@@ -188,20 +229,27 @@ Now for putting it all together.
 
 -- Helpers for defining methods
 
--- < partial helper
+-- < partial
 
 -- < offsets_to_positions
+
+-- < tap
 
 -- < Position class
 
   -- Position methods
   -- < Position methods
 
+  -- Position methods that return nil
+  -- < Position methods that return nil
+
   -- Direction methods
   -- < Direction methods
 
   -- Area methods
   -- < Area methods
+
+-- < module return
 ```
 ```moonscript
 up = vector.new(0, 1, 0)
@@ -221,13 +269,34 @@ class Conditional
     pred(...) and t(...) or (f or -> nil)(...)
 
 class Iterable extends Conditional
+  reduce: (items, fn, acc) ->
+    for item in items
+      acc = fn(acc, at(item))
+    acc
+
   map: (fn) ->
-    for item in @
-      fn(item)
+    @reduce((acc, item) ->
+      table.insert acc, fn(item)
+      acc
+    , {})
 
   each: (fn) ->
+    @reduce((acc, item) ->
+      fn item
+      acc
+    , nil)
+
+  filter: (pred) ->
+    @reduce((acc, item) ->
+      if pred item
+        table.insert acc, item
+      acc
+    , {})
+
+  find: (pred) ->
     for item in @
-      fn(item)
+      return item if pred at(item)
+    nil
 
 -- Helpers for defining methods
 
@@ -235,10 +304,12 @@ partial = (fn, ...) ->
   fixed = {...}
   (...) -> fn unpack(fixed), ...
 
-offsets_to_positions = fn -> (pos, v1, v2, ...) ->
+offsets_to_positions = (fn) -> (pos, v1, v2, ...) ->
   p1 = vector.add(pos, v1)
   p2 = vector.add(pos, v2)
   fn(p1, p2, ...)
+
+tap = (fn) -> (...) -> fn(...); ...
 
 class Position extends Conditional
 
@@ -248,9 +319,17 @@ class Position extends Conditional
   -- Position methods
   get_meta: core.get_meta
   get_node: core.get_node
+  get_node_or_nil: core.get_node_or_nil
+  get_node_timer: core.get_node_timer
   get_node_light: core.get_node_light
+  get_natural_light: core.get_natural_light
   get_meta: core.get_meta
   find_node_near: core.find_node_near
+  
+  set_node: tap(core.set_node)
+
+  -- Position methods that return nil
+  set_node: tap(core.set_node)
 
   -- Direction methods
   up: partial(vector.add, up)
@@ -266,6 +345,11 @@ class Position extends Conditional
   -- Area methods
   find_nodes_in_area_under_air: offsets_to_positions(core.find_nodes_in_area_under_air)
   find_nodes_in_area: offsets_to_positions(core.find_nodes_in_area)
+
+at = (pos) ->
+  Position.enhance(pos)
+
+return at, Position
 ```
 
 
@@ -290,13 +374,3 @@ markatzea README.mz > README.md
 # Create the init.lua
 moonc init.moon
 ```
-
-You can read another article about doing in world generative testing for Luanti (mods) using [luanti_check][luanti_check].
-
-[example]:#example
-[setmetatable]:https://www.lua.org/pil/13.html
-[unpack]:https://www.lua.org/pil/5.1.html
-[luanti_check]:https://github.com/bas080/luanti_check
-[point-free]:https://en.wikipedia.org/wiki/Tacit_programming
-[woven]:https://github.com/bas080/woven
-[markatzea]:https://github.com/bas080/markatzea

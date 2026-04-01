@@ -30,7 +30,7 @@ The `at` module returns the following.
 at = (pos) ->
   Position.enhance(pos)
 
-return at
+return at, Position
 ```
 
 The `at` being the function you saw in action in the [example][example].
@@ -94,9 +94,28 @@ pos as first argument as is.
 ```moonscript woven 'Position methods'
 get_meta: core.get_meta
 get_node: core.get_node
+get_node_or_nil: core.get_node_or_nil
+get_node_timer: core.get_node_timer
 get_node_light: core.get_node_light
+get_natural_light: core.get_natural_light
 get_meta: core.get_meta
 find_node_near: core.find_node_near
+
+-- < Position methods that return nil
+```
+
+Some methods like `core.set_node` do a mutation to the world and do not return something.
+These we can make a bit more chainable. In the [fp][fp] world the [higher order function][higher_order_function] that enables
+that is often called `tap`.
+
+```moonscript woven 'tap'
+tap = (fn) -> (...) ->
+  fn(...)
+  return ...
+```
+
+```moonscript woven 'Position methods that return nil'
+set_node: tap(core.set_node)
 ```
 
 Then we have a few helpers that require partial application.
@@ -115,7 +134,7 @@ neighbours: () => Iterator.map(neighbour_offsets, n -> vector.add(n, @))
 
 The partial implementation:
 
-```moonscript woven 'partial helper'
+```moonscript woven 'partial'
 partial = (fn, ...) ->
   fixed = {...}
   (...) -> fn unpack(fixed), ...
@@ -124,13 +143,19 @@ partial = (fn, ...) ->
 We also have the pattern where functions that allow for two positions to define an area could also be abstracted.
 
 ```moonscript woven offsets_to_positions
-offsets_to_positions = fn -> (pos, v1, v2, ...) ->
+offsets_to_positions = (fn) -> (pos, v1, v2, ...) ->
   p1 = vector.add(pos, v1)
   p2 = vector.add(pos, v2)
   fn(p1, p2, ...)
 ```
 
 ```moonscript woven 'Area methods'
+find_nodes_in_radius: (radius, ...) -> @find_nodes_in_area(
+  vector.new(-radius, -radius, -radius),
+  vector.new(radius, radius, radius),
+  ...
+)
+
 find_nodes_in_area_under_air: offsets_to_positions(core.find_nodes_in_area_under_air)
 find_nodes_in_area: offsets_to_positions(core.find_nodes_in_area)
 ```
@@ -163,18 +188,42 @@ class Conditional
 
 With this defined and extended upon we can do `at(pos):if_else(is_under_water, hold_breath, breath)`.
 
-Furthermore we want some helpers that make it easier to work with table. This will allow us to write.
+Furthermore we want some helpers that make it easier to work with positions. This will allow us to write.
 `at(pos):neighbours():map(f -> f:up!)`
 
-```moonscript woven Conditional class
-class Iterable extends Conditional
-  map: (fn) ->
-    for item in @
-      fn(item)
+These helpers are only meant to work on positions. You do not want to be enhancing things that do not
+represent a position with position methods.
 
-  each: (fn) ->
+```moonscript woven 'Iterable class'
+class Iterable extends Conditional
+  reduce: (fn, acc) ->
     for item in @
-      fn(item)
+      acc = fn acc, at(item)
+    acc
+
+  map: (fn) =>
+    @reduce ((acc, item) ->
+      table.insert acc, fn(item)
+      acc
+    ), {}
+
+  each: (fn) =>
+    @reduce ((acc, item) ->
+      fn item
+      acc
+    ), nil
+
+  filter: (pred) =>
+    @reduce ((acc, item) ->
+      if pred item
+        table.insert acc, item
+      acc
+    ), {}
+
+  find: (pred) ->
+    for item in @
+      return item if pred at(item)
+    nil
 ```
 
 Now for putting it all together.
@@ -188,22 +237,28 @@ Now for putting it all together.
 
 -- Helpers for defining methods
 
--- < partial helper
+-- < partial
 
 -- < offsets_to_positions
+
+-- < tap
 
 -- < Position class
 
   -- Position methods
   -- < Position methods
 
+  -- Position methods that return nil
+  -- < Position methods that return nil
+
   -- Direction methods
   -- < Direction methods
 
   -- Area methods
   -- < Area methods
-```
 
+-- < module return
+```
 
 That is all the code for now. You can always check the [repository][repository] if you want to see if this document has changed.
 
@@ -215,12 +270,14 @@ I wish you fun and peace writing Lua and moonscript.
 
 This is a literate project that uses [markatzea][markatzea] in concert with [woven][woven] to weave code from a markdown file.
 
-You can generate both the README and the code with:
+You can generate both the README.md and the init.lua with:
 
 ```bash
 # Also writes the init.moon
 markatzea README.mz > README.md
 ```
+
+That will also run the following command.
 
 ```bash bash
 # Create the init.lua
